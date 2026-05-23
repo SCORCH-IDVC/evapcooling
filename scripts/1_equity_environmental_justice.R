@@ -10,21 +10,20 @@ library(cowplot)
 
 bg_sf <- st_read(here("data", "Q1 Data Shapefile", "pima_Q1_data.shp"))
 
-#Dropping empty polygons
+# Drop empty polygons
 bg_sf <- bg_sf[bg_sf$med_inc != 0 & !is.na(bg_sf$med_inc), ]
 bg_sf <- bg_sf[!is.na(bg_sf$evp_prp), ]
 
-## Keep only those inside urban areas
+# Keep only those inside urban areas
 UrbanAreas <- st_read(here("data", "2020_Arizona_Census_Urban_Areas", "2020_Arizona_Census_Urban_Areas.shp"))
 UrbanAreas <- st_transform(UrbanAreas, st_crs(bg_sf))
 UrbanAreas <- st_make_valid(UrbanAreas)
 bg_centroids <- st_centroid(bg_sf)
 inside <- st_intersects(bg_centroids, st_union(UrbanAreas), sparse = FALSE)[, 1]
 bg_sf <- bg_sf[inside, ]
-
 bg <- data.frame(bg_sf)
 
-## Rename columns to match the simulated dataset
+# Rename columns
 colnames(bg)[colnames(bg) == "geoid20"]   <- "GEOID"
 colnames(bg)[colnames(bg) == "evp_prp"]   <- "evap_prop"
 colnames(bg)[colnames(bg) == "med_inc"]    <- "med_income"
@@ -34,7 +33,7 @@ colnames(bg)[colnames(bg) == "pct_rnt"]    <- "pct_renter"
 colnames(bg)[colnames(bg) == "pct_sfr"]    <- "pct_sfh"
 colnames(bg)[colnames(bg) == "covennt"]    <- "covenant"
 
-## Compute centroids for lon/lat
+# Compute centroids for lon/lat
 bg_sf <- st_as_sf(bg)
 bg_sf <- st_transform(bg_sf, 4326)
 coords <- st_coordinates(st_centroid(bg_sf))
@@ -42,15 +41,12 @@ bg$lon <- coords[, 1]
 bg$lat <- coords[, 2]
 bg_sf <- st_make_valid(bg_sf)
 
-# 2. DESCRIPTIVE STATISTICS BY EVAP PREVALENCE QUARTILE
-
-## Create quartiles
+# Create quartiles
 bg$evap_q <- cut(bg$evap_prop,
                  breaks = quantile(bg$evap_prop, probs = 0:4/4),
                  labels = c("Q1 (lowest)", "Q2", "Q3", "Q4 (highest)"),
                  include.lowest = TRUE)
 
-## Summary function
 summarize_by_quartile <- function(x, group) {
   means <- tapply(x, group, mean, na.rm = TRUE)
   sds <- tapply(x, group, sd, na.rm = TRUE)
@@ -60,7 +56,6 @@ summarize_by_quartile <- function(x, group) {
              sd = round(sds, 2), se = round(ses, 2), n = as.integer(ns))
 }
 
-## Build Table 1
 vars <- c("med_income", "pct_minority", "med_year_built", "pct_renter", "pct_sfh")
 var_labels <- c("Median income ($)", "Minority (%)", "Median year built",
                 "Renter (%)", "Single-family (%)")
@@ -73,25 +68,15 @@ table1_list <- lapply(vars, function(v) {
 table1 <- do.call(rbind, table1_list)
 table1$var_label <- rep(var_labels, each = 4)
 
-## Kruskal-Wallis test across quartiles for each variable
+# Kruskal-Wallis test across quartiles for each variable
 kw_tests <- sapply(vars, function(v) {
   kruskal.test(bg[[v]] ~ bg$evap_q)$p.value
 })
 names(kw_tests) <- var_labels
 
-cat("\n=== TABLE 1: Block group characteristics by evap cooler quartile ===\n")
-print(table1[, c("var_label", "quartile", "mean", "se", "n")])
-cat("\nKruskal-Wallis p-values:\n")
-print(round(kw_tests, 4))
-
-## Export Table 1
 write.csv(table1, here("results", "P1_Table1_quartile_summary.csv"), row.names = FALSE)
 
-
-# 3. BIVARIATE CORRELATIONS
-
-
-## Spearman correlations
+# Spearman correlations
 cor_vars <- c("med_income", "pct_minority", "med_year_built", "pct_renter")
 cor_labels <- c("Median income", "% Minority", "Median year built", "% Renter")
 
@@ -103,52 +88,28 @@ cor_results <- data.frame(
 cor_results$rho <- round(cor_results$rho, 3)
 cor_results$p <- signif(cor_results$p, 3)
 
-cat("\n=== SPEARMAN CORRELATIONS with evap cooler prevalence ===\n")
-print(cor_results)
-
-
-# 4. COVENANT OVERLAY
-
-
-## Proportion of evap-cooler households in vs out of covenanted areas
+# Proportion of evap-cooler households in vs out of covenanted areas
 cov_in <- bg$evap_prop[bg$covenant == 1]
 cov_out <- bg$evap_prop[bg$covenant == 0]
 
-cat("\n=== COVENANT COMPARISON ===\n")
-cat("Mean evap prevalence inside covenants:", round(mean(cov_in), 3), "\n")
-cat("Mean evap prevalence outside covenants:", round(mean(cov_out), 3), "\n")
-
-## Wilcoxon test
+# Wilcoxon test
 wt <- wilcox.test(cov_in, cov_out)
 cat("Wilcoxon p-value:", signif(wt$p.value, 3), "\n")
 
-## Odds ratio: are block groups with above-median evap prevalence more likely covenanted?
+# Odds ratio
 evap_high <- as.integer(bg$evap_prop > median(bg$evap_prop))
 cov_table <- table(evap_high, bg$covenant)
 or_fish <- fisher.test(cov_table)
 
-cat("Odds ratio (high evap in covenanted):", round(or_fish$estimate, 2), "\n")
-cat("Fisher p-value:", signif(or_fish$p.value, 3), "\n")
-cat("95% CI:", round(or_fish$conf.int, 2), "\n")
-
-
-# 5. GLM: PREDICTORS OF EVAPORATIVE COOLER PREVALENCE
-
-
-## Standardize predictors for comparable coefficients
+# Predictors of Evap Cooler prevalence
 bg$z_income <- scale(bg$med_income)
 bg$z_minority <- scale(bg$pct_minority)
 bg$z_year_built <- scale(bg$med_year_built)
 bg$z_renter <- scale(bg$pct_renter)
 
-## Quasibinomial GLM (proportional outcome, accounting for overdispersion)
 m1 <- glm(evap_prop ~ z_income + z_minority + z_year_built + z_renter + covenant,
           family = quasibinomial, data = bg)
 
-cat("\n=== TABLE 2: GLM RESULTS ===\n")
-print(summary(m1))
-
-## Extract coefficients table
 coef_table <- data.frame(
   variable = c("Intercept", "Income (z)", "Minority (z)", "Year built (z)",
                "Renter (z)", "Covenant"),
@@ -158,24 +119,17 @@ coef_table <- data.frame(
 )
 write.csv(coef_table, here("results", "P1_Table2_GLM_results.csv"), row.names = FALSE)
 
-## Check spatial autocorrelation of residuals
+# Spatial autocorrelation of residuals
 coords <- cbind(bg$lon, bg$lat)
 nb <- knn2nb(knearneigh(coords, k = 5))
 lw <- nb2listw(nb, style = "W")
 moran_resid <- moran.test(residuals(m1), lw)
 
-cat("\nMoran's I on GLM residuals:", round(moran_resid$estimate[1], 3), "\n")
-cat("Moran p-value:", signif(moran_resid$p.value, 3), "\n")
-
-## If significant, we need to use the spatial error model
 if (moran_resid$p.value < 0.05) {
-  cat("Spatial autocorrelation detected. Fitting spatial error model.\n")
-  
   m_spatial <- errorsarlm(evap_prop ~ z_income + z_minority + z_year_built + z_renter + covenant,
                           data = bg, listw = lw)
   print(summary(m_spatial))
   
-  ## Extract coefficients table
   se_coefs <- summary(m_spatial)$Coef
   coef_table_spatial <- data.frame(
     variable = rownames(se_coefs),
@@ -186,14 +140,10 @@ if (moran_resid$p.value < 0.05) {
   write.csv(coef_table_spatial, here("results", "P1_Table2b_spatial_error_model.csv"), row.names = FALSE)
 }
 
-# 6. LISA CLUSTERING
-
-## Local Moran's I on evaporative cooler prevalence
+# LISA clustering
 lisa <- localmoran(bg$evap_prop, lw)
 bg$lisa_I <- lisa[, 1]
 bg$lisa_p <- lisa[, 5]
-
-## Classify LISA clusters
 bg$lag_evap <- lag.listw(lw, bg$evap_prop)
 mean_evap <- mean(bg$evap_prop)
 mean_lag <- mean(bg$lag_evap)
@@ -205,24 +155,14 @@ bg$lisa_cluster[sig & bg$evap_prop < mean_evap & bg$lag_evap < mean_lag] <- "Low
 bg$lisa_cluster[sig & bg$evap_prop > mean_evap & bg$lag_evap < mean_lag] <- "High-Low"
 bg$lisa_cluster[sig & bg$evap_prop < mean_evap & bg$lag_evap > mean_lag] <- "Low-High"
 
-cat("\n=== LISA CLUSTER COUNTS ===\n")
-print(table(bg$lisa_cluster))
-
-
-# 7. FIGURES
-
-## Color palettes
+# Plots
 pal_lisa <- c("High-High" = "#d7191c", "Low-Low" = "#2c7bb6",
               "High-Low" = "#fdae61", "Low-High" = "#abd9e9",
               "Not significant" = "grey90")
 pal_cov <- c("0" = "grey70", "1" = "#7b3294")
 
-## ---- Fig 1: Choropleth of evap cooler prevalence ----
-library(maps)
-library(cowplot)
 us <- map_data("state")
 az <- us[us$region == "arizona", ]
-
 inset <- ggplot() +
   geom_polygon(data = us, aes(x = long, y = lat, group = group),
                fill = "grey90", color = "grey70", size = 0.15) +
@@ -236,8 +176,6 @@ inset <- ggplot() +
   theme(panel.border = element_rect(color = "black", fill = NA, size = 0.5)) +
   labs(title = "b") +
   theme(plot.title = element_text(size = 10, face = "bold"))
-
-## Main map with city boundary
 city_boundary <- st_union(bg_sf)
 
 fig1_main <- ggplot() +
@@ -259,7 +197,7 @@ fig1 <- ggdraw() +
   draw_plot(fig1_main, x = 0, y = 0, width = 1, height = 1) +
   draw_plot(inset, x = 0.62, y = 0.72, width = 0.35, height = 0.3)
 
-## ---- Fig 2: LISA cluster map ----
+
 bg_sf$lisa_cluster <- bg$lisa_cluster
 fig2 <- ggplot(bg_sf) +
   geom_sf(aes(fill = lisa_cluster), color = "white", size = 0.15) +
@@ -279,8 +217,6 @@ fig2 <- ggdraw() +
   draw_plot(fig2, x = 0, y = 0, width = 1, height = 1) +
   draw_plot(inset, x = 0.62, y = 0.72, width = 0.35, height = 0.3)
 
-
-## ---- Fig 3a-d: Scatterplots (evap prevalence vs sociodemographics) ----
 make_scatter <- function(xvar, xlab, panel_label) {
   rho <- cor(bg$evap_prop, bg[[xvar]], method = "spearman")
   pval <- cor.test(bg$evap_prop, bg[[xvar]], method = "spearman")$p.value
@@ -306,7 +242,6 @@ fig3b <- make_scatter("pct_minority", "Minority proportion", "d")
 fig3c <- make_scatter("med_year_built", "Median year built", "e")
 fig3d <- make_scatter("pct_renter", "Renter proportion", "f")
 
-## ---- Fig 4: Covenant comparison (forest plot style) ----
 or_dat <- data.frame(
   label = "High evap.\nin covenanted area",
   or = or_fish$estimate,
@@ -324,13 +259,9 @@ fig4 <- ggplot(or_dat, aes(x = or, y = label)) +
   labs(x = "Odds ratio (95% CI)", y = "")
 
 
-# 8. EXPORT FIGURES
-
-## ---- Figure 1: Maps (panels a, b) ----
 pdf(here("results", "P1_Figure1.pdf"), width = 4, height = 5)
 print(fig1)
 dev.off()
-
 
 pdf(here("results", "P1_Figure2.pdf"), width = 4, height = 5)
 print(fig2)
@@ -346,7 +277,6 @@ png(here("results", "P1_Figure1_maps.png"), width = 10, height = 5, units = "in"
 print(fig1_combined)
 dev.off()
 
-## ---- Figure 2: Scatterplots (panels a, b, c, d) ----
 fig3a <- make_scatter("med_income", "Median household income ($)", "a")
 fig3b <- make_scatter("pct_minority", "Minority proportion", "b")
 fig3c <- make_scatter("med_year_built", "Median year built", "c")
@@ -362,7 +292,6 @@ png(here("results", "P1_Figure2_scatterplots.png"), width = 8, height = 7, units
 print(fig2_combined)
 dev.off()
 
-## ---- Figure 3: Covenant odds ratio ----
 pdf(here("results", "P1_Figure3_covenant_OR.pdf"), width = 5, height = 3)
 print(fig4 + labs(title = ""))
 dev.off()

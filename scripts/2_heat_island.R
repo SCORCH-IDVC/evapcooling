@@ -8,12 +8,8 @@ library(patchwork)
 library(prism)
 
 bg_sf <- st_read(here("data", "Q1 Data Shapefile", "pima_Q1_data.shp"))
-
-#Dropping empty polygons
 bg_sf <- bg_sf[bg_sf$med_inc != 0 & !is.na(bg_sf$med_inc), ]
 bg_sf <- bg_sf[!is.na(bg_sf$evp_prp), ]
-
-## Keep only those inside urban areas
 UrbanAreas <- st_read(here("data", "2020_Arizona_Census_Urban_Areas", "2020_Arizona_Census_Urban_Areas.shp"))
 UrbanAreas <- st_transform(UrbanAreas, st_crs(bg_sf))
 UrbanAreas <- st_make_valid(UrbanAreas)
@@ -22,7 +18,7 @@ inside <- st_intersects(bg_centroids, st_union(UrbanAreas), sparse = FALSE)[, 1]
 bg_sf <- bg_sf[inside, ]
 bg <- data.frame(bg_sf)
 
-## Rename columns to match the simulated dataset
+# Rename columns
 colnames(bg)[colnames(bg) == "geoid20"]   <- "GEOID"
 colnames(bg)[colnames(bg) == "evp_prp"]   <- "evap_prop"
 colnames(bg)[colnames(bg) == "med_inc"]    <- "med_income"
@@ -31,8 +27,6 @@ colnames(bg)[colnames(bg) == "ave_age"]    <- "med_year_built"
 colnames(bg)[colnames(bg) == "pct_rnt"]    <- "pct_renter"
 colnames(bg)[colnames(bg) == "pct_sfr"]    <- "pct_sfh"
 colnames(bg)[colnames(bg) == "covennt"]    <- "covenant"
-
-## Compute centroids for lon/lat
 bg_sf <- st_as_sf(bg)
 bg_sf <- st_transform(bg_sf, 4326)
 coords <- st_coordinates(st_centroid(bg_sf))
@@ -40,7 +34,7 @@ bg$lon <- coords[, 1]
 bg$lat <- coords[, 2]
 bg_sf <- st_make_valid(bg_sf)
 
-# 2. DOWNLOAD SUMMER TEMPERATURE (PRISM tmax)
+# PRISM tmax
 dir.create(here("data", "rasters"), recursive = TRUE, showWarnings = FALSE)
 lst_path <- here("data", "rasters", "tucson_tmax_summer.tif")
 
@@ -51,64 +45,39 @@ if (!file.exists(lst_path)) {
   dir.create(prism_dir, recursive = TRUE, showWarnings = FALSE)
   prism_set_dl_dir(prism_dir)
   
-  ## Download monthly tmax for Jun, Jul, Aug, Sep 2023
+  # Download monthly tmax for Jun, Jul, Aug, Sep 2023
   get_prism_monthlys(type = "tmax", years = 2023, mon = 6:9, keepZip = FALSE)
   
-  ## List downloaded files and stack
   pd <- prism_archive_ls()
   cat("PRISM files downloaded:", length(pd), "\n")
   
   bil_files <- pd_to_file(pd)
   tmax_stack <- rast(bil_files)
   
-  ## Crop to study area and compute summer mean tmax
+  # Crop to study area and compute summer mean tmax
   bg_4326 <- st_transform(bg_sf, 4326)
   roi <- ext(as.numeric(st_bbox(bg_4326)))
   tmax_stack <- crop(tmax_stack, roi)
   tmax_comp <- app(tmax_stack, fun = mean, na.rm = TRUE)
   
   writeRaster(tmax_comp, lst_path, overwrite = TRUE)
-  cat("Summer tmax composite saved (PRISM, Jun-Sep 2023, 4km)\n")
 }
 
 cat("Temperature raster:", lst_path, "\n")
 
-# 3. ZONAL STATISTICS
+# Statistics
 tmax_r <- rast(lst_path)
-
-## Reproject block groups to match raster CRS
 bg_proj <- st_transform(bg_sf, crs(tmax_r))
-
-## Extract mean summer tmax per block group
 bg$mean_tmax <- exact_extract(tmax_r, bg_proj, 'mean')
 
-cat("\n=== ZONAL STATISTICS ===\n")
-cat("Tmax range:", round(range(bg$mean_tmax, na.rm = TRUE), 1), "C\n")
-
-## ---- NDVI zonal statistics ----
-
 ndvi_path <- here("data", "Tucson_landsat_ndvi_mean_2023-2025.tif")
-
-if (file.exists(ndvi_path)) {
-  ndvi_r <- rast(ndvi_path)
-  bg_proj_ndvi <- st_transform(bg_sf, crs(ndvi_r))
-  bg$mean_ndvi <- exact_extract(ndvi_r, bg_proj_ndvi, 'mean')
-  cat("NDVI range:", round(range(bg$mean_ndvi, na.rm = TRUE), 3), "\n")
-} else {
-  cat("WARNING: NDVI raster not found at", ndvi_path, "\n")
-  cat("NDVI analyses will be skipped.\n")
-  bg$mean_ndvi <- NA
-}
-
+ndvi_r <- rast(ndvi_path)
+bg_proj_ndvi <- st_transform(bg_sf, crs(ndvi_r))
+bg$mean_ndvi <- exact_extract(ndvi_r, bg_proj_ndvi, 'mean')
 has_ndvi <- !all(is.na(bg$mean_ndvi))
-
-## Drop block groups with NA tmax
 bg <- bg[!is.na(bg$mean_tmax), ]
-cat("Block groups with valid tmax:", nrow(bg), "\n")
-if (has_ndvi) cat("Block groups with valid NDVI:", sum(!is.na(bg$mean_ndvi)), "\n")
 
-# 4. TABLE 1: BLOCK GROUP CHARACTERISTICS BY EVAP QUARTILE
-
+# Block characteristics by quartile
 bg$evap_q <- cut(bg$evap_prop,
                  breaks = quantile(bg$evap_prop, probs = 0:4/4),
                  labels = c("Q1 (lowest)", "Q2", "Q3", "Q4 (highest)"),
@@ -126,11 +95,8 @@ summarize_by_quartile <- function(x, group) {
 vars <- c("mean_tmax", "med_income", "pct_minority", "pct_renter")
 var_labels <- c("Mean summer tmax (C)", "Median income ($)",
                 "Minority (%)", "Renter (%)")
-
-## Add NDVI to table
 vars <- c(vars, "mean_ndvi")
 var_labels <- c(var_labels, "Mean NDVI")
-
 
 table1_list <- lapply(vars, function(v) {
   out <- summarize_by_quartile(bg[[v]], bg$evap_q)
@@ -144,22 +110,13 @@ kw_tests <- sapply(vars, function(v) {
   kruskal.test(bg[[v]] ~ bg$evap_q)$p.value
 })
 names(kw_tests) <- var_labels
-
-cat("\n=== TABLE 1 ===\n")
-print(table1[, c("var_label", "quartile", "mean", "se", "n")])
-cat("\nKruskal-Wallis p-values:\n")
-print(round(kw_tests, 4))
-
 write.csv(table1, here("results", "P2_Table1_quartile_tmax.csv"), row.names = FALSE)
 
-# 5. SPEARMAN CORRELATIONS
-
+# Spearman correlations
 cor_vars <- c("mean_tmax", "med_income", "pct_minority", "pct_renter")
 cor_labels <- c("Mean summer tmax", "Median income", "% Minority", "% Renter")
-
 cor_vars <- c(cor_vars, "mean_ndvi")
 cor_labels <- c(cor_labels, "Mean NDVI")
-
 cor_results <- data.frame(
   variable = cor_labels,
   rho = sapply(cor_vars, function(v) cor(bg$evap_prop, bg[[v]], method = "spearman", use = "complete.obs")),
@@ -168,38 +125,19 @@ cor_results <- data.frame(
 cor_results$rho <- round(cor_results$rho, 3)
 cor_results$p <- signif(cor_results$p, 3)
 
-cat("\n=== SPEARMAN CORRELATIONS ===\n")
-print(cor_results)
-
-## NDVI-tmax correlation (vegetation as heat mediator)
 ndvi_tmax_cor <- cor.test(bg$mean_ndvi, bg$mean_tmax, method = "spearman")
-cat("\nNDVI-tmax correlation: rho =", round(ndvi_tmax_cor$estimate, 3),
-    "p =", signif(ndvi_tmax_cor$p.value, 3), "\n")
-
 ndvi_income_cor <- cor.test(bg$mean_ndvi, bg$med_income, method = "spearman")
-cat("NDVI-income correlation: rho =", round(ndvi_income_cor$estimate, 3),
-    "p =", signif(ndvi_income_cor$p.value, 3), "\n")
-
-
 write.csv(cor_results, here("results", "P2_TableS1_correlations.csv"), row.names = FALSE)
 
-# 6. BIVARIATE LISA: EVAP PREVALENCE x TEMPERATURE
-
-## Spatial weights
+# Bivariate LISA
 coords <- cbind(bg$lon, bg$lat)
 nb <- knn2nb(knearneigh(coords, k = 5))
 lw <- nb2listw(nb, style = "W")
-
-## Standardize
 z_evap <- scale(bg$evap_prop)
 z_tmax <- scale(bg$mean_tmax)
-
-## Local Moran's I on evap prevalence
 lisa_bi <- localmoran(as.numeric(z_evap), lw)
 bg$lisa_bi_I <- lisa_bi[, 1]
 bg$lisa_bi_p <- lisa_bi[, 5]
-
-## Classify bivariate clusters using local evap and spatially lagged tmax
 lag_tmax <- lag.listw(lw, z_tmax)
 
 bg$bi_cluster <- "Not significant"
@@ -209,21 +147,13 @@ bg$bi_cluster[sig & z_evap < 0 & lag_tmax < 0] <- "Low evap / Cool"
 bg$bi_cluster[sig & z_evap > 0 & lag_tmax < 0] <- "High evap / Cool"
 bg$bi_cluster[sig & z_evap < 0 & lag_tmax > 0] <- "Low evap / Hot"
 
-cat("\n=== BIVARIATE LISA CLUSTERS ===\n")
-print(table(bg$bi_cluster))
-cat("Double-exposure hotspots (High evap / Hot):", sum(bg$bi_cluster == "High evap / Hot"), "\n")
-
-# 7. GLM: PREDICTORS OF EVAP COOLER PREVALENCE
+# Predictors of evap cooler prevalence
 bg$z_tmax   <- scale(bg$mean_tmax)
 bg$z_income <- scale(bg$med_income)
 bg$z_renter <- scale(bg$pct_renter)
 
-## Quasibinomial GLM (without NDVI)
 m1 <- glm(evap_prop ~ z_tmax + z_income + z_renter,
           family = quasibinomial, data = bg)
-
-cat("\n=== TABLE 2: GLM RESULTS ===\n")
-print(summary(m1))
 
 coef_table <- data.frame(
   variable = c("Intercept", "Summer tmax (z)", "Income (z)", "Renter (z)"),
@@ -232,13 +162,9 @@ coef_table <- data.frame(
   p = signif(summary(m1)$coefficients[, 4], 3)
 )
 
-## GLM with NDVI
 bg$z_ndvi <- scale(bg$mean_ndvi)
 m2 <- glm(evap_prop ~ z_tmax + z_ndvi + z_income + z_renter,
           family = quasibinomial, data = bg)
-
-cat("\n=== TABLE 2b: GLM WITH NDVI ===\n")
-print(summary(m2))
 
 coef_table_ndvi <- data.frame(
   variable = c("Intercept", "Summer tmax (z)", "NDVI (z)", "Income (z)", "Renter (z)"),
@@ -247,52 +173,35 @@ coef_table_ndvi <- data.frame(
   p = signif(summary(m2)$coefficients[, 4], 3)
 )
 write.csv(coef_table_ndvi, here("results", "P2_Table2c_GLM_with_NDVI.csv"), row.names = FALSE)
-
-## Compare AIC-like deviance
-cat("\nDeviance without NDVI:", round(deviance(m1), 1), "\n")
-cat("Deviance with NDVI:   ", round(deviance(m2), 1), "\n")
-
-
 write.csv(coef_table, here("results", "P2_Table2_GLM_results.csv"), row.names = FALSE)
 
-## Moran's I on residuals
 moran_resid <- moran.test(residuals(m1), lw)
 cat("\nMoran's I on GLM residuals:", round(moran_resid$estimate[1], 3), "\n")
 cat("Moran p-value:", signif(moran_resid$p.value, 3), "\n")
 
-## Spatial error model if needed
-if (moran_resid$p.value < 0.05) {
-  cat(">> Spatial autocorrelation detected. Fitting spatial error model.\n")
-  library(spatialreg)
-  m_spatial <- errorsarlm(evap_prop ~ z_tmax + z_income + z_renter,
-                          data = bg, listw = lw)
-  print(summary(m_spatial))
-  
-  se_coefs <- summary(m_spatial)$Coef
-  coef_table_spatial <- data.frame(
-    variable = rownames(se_coefs),
-    estimate = round(se_coefs[, 1], 3),
-    se = round(se_coefs[, 2], 3),
-    p = signif(se_coefs[, 4], 3)
-  )
-  write.csv(coef_table_spatial, here("results", "P2_Table2b_spatial_error_model.csv"), row.names = FALSE)
-}
+library(spatialreg)
+m_spatial <- errorsarlm(evap_prop ~ z_tmax + z_income + z_renter,
+                        data = bg, listw = lw)
+se_coefs <- summary(m_spatial)$Coef
+coef_table_spatial <- data.frame(
+  variable = rownames(se_coefs),
+  estimate = round(se_coefs[, 1], 3),
+  se = round(se_coefs[, 2], 3),
+  p = signif(se_coefs[, 4], 3)
+)
+write.csv(coef_table_spatial, here("results", "P2_Table2b_spatial_error_model.csv"), row.names = FALSE)
 
-# 8. CHARACTERIZE DOUBLE-EXPOSURE HOTSPOTS
 
+# Double exposure hotspots
 hotspot <- bg[bg$bi_cluster == "High evap / Hot", ]
 non_hotspot <- bg[bg$bi_cluster != "High evap / Hot", ]
-
 compare_vars <- c("evap_prop", "mean_tmax", "med_income",
                   "pct_minority", "pct_renter", "med_year_built")
 compare_labels <- c("Evap. prevalence", "Mean summer tmax (C)",
                     "Median income ($)", "Minority (%)",
                     "Renter (%)", "Year built")
-
-## Add NDVI to hotspot comparison
 compare_vars <- c(compare_vars, "mean_ndvi")
 compare_labels <- c(compare_labels, "Mean NDVI (tree cover)")
-
 hotspot_table <- data.frame(
   variable = compare_labels,
   hotspot_mean = sapply(compare_vars, function(v) round(mean(hotspot[[v]], na.rm = TRUE), 2)),
@@ -304,17 +213,12 @@ hotspot_table <- data.frame(
   })
 )
 
-cat("\n=== TABLE S2: Double-exposure hotspots vs. city-wide ===\n")
-print(hotspot_table)
-
 write.csv(hotspot_table, here("results", "P2_TableS2_hotspot_demographics.csv"), row.names = FALSE)
 
-## Plot distributions
 hotspot$group <- "Hotspot"
 non_hotspot$group <- "Non-hotspot"
 combined <- rbind(hotspot, non_hotspot)
 
-## Build histograms
 hist_list <- lapply(seq_along(compare_vars), function(i) {
   v <- compare_vars[i]
   lab <- compare_labels[i]
@@ -334,7 +238,6 @@ hist_list <- lapply(seq_along(compare_vars), function(i) {
     labs(x = lab, y = "Scaled density", title = letters[i])
 })
 
-## Combine into panel layout (adjust grid if NDVI is present)
 if (has_ndvi && length(hist_list) == 7) {
   fig_hist <- (hist_list[[1]] + hist_list[[2]] + hist_list[[3]]) /
     (hist_list[[4]] + hist_list[[5]] + hist_list[[6]]) /
@@ -354,14 +257,12 @@ png(here("results", "P2_FigureS2_hotspot_histograms.png"), width = 10, height = 
 print(fig_hist)
 dev.off()
 
-# 9. FIGURES
+# Figures 
 dir.create(here("results"), recursive = TRUE, showWarnings = FALSE)
-
 bg_sf2 <- st_as_sf(bg)
 if (is.na(st_crs(bg_sf2))) bg_sf2 <- st_set_crs(bg_sf2, 4326)
 bg_sf2 <- st_make_valid(bg_sf2)
 
-## ---- Figure 1: Bivariate choropleth (evap prevalence x tmax) ----
 bg$evap_cat <- cut(bg$evap_prop,
                    breaks = quantile(bg$evap_prop, probs = c(0, 1/3, 2/3, 1)),
                    labels = c("Low", "Mid", "High"), include.lowest = TRUE)
@@ -394,7 +295,6 @@ fig1 <- ggplot(bg_sf2) +
         plot.title = element_text(size = 10, face = "bold")) +
   labs(title = "a")
 
-## Bivariate legend inset
 legend_df <- expand.grid(evap = c("Low", "Mid", "High"),
                          tmax = c("Cool", "Mid", "Hot"))
 legend_df$fill <- bivar_pal[paste(legend_df$evap, legend_df$tmax, sep = " / ")]
@@ -412,7 +312,6 @@ fig1_legend <- ggplot(legend_df, aes(x = evap, y = tmax, fill = fill)) +
         axis.title = element_text(size = 7, face = "bold"),
         plot.background = element_rect(fill = "white", color = NA))
 
-## ---- Figure 2: LISA cluster map ----
 library(maps)
 library(cowplot)
 us <- map_data("state")
@@ -432,7 +331,6 @@ inset <- ggplot() +
   labs(title = "b") +
   theme(plot.title = element_text(size = 10, face = "bold"))
 
-## Main map with city boundary
 city_boundary <- st_union(bg_sf)
 
 bi_pal <- c("High evap / Hot"  = "#d7191c",
@@ -467,7 +365,6 @@ pdf(here("results", "P2_Figure2.pdf"), width = 6, height = 5)
 print(fig2)
 dev.off()
 
-## ---- Figure 3: NDVI choropleth map ----
 bg_sf2$mean_ndvi <- bg$mean_ndvi
 
 fig3_ndvi <- ggplot(bg_sf2) +
@@ -493,7 +390,6 @@ print(fig3_ndvi)
 dev.off()
 
 
-## ---- Figure S1: Scatterplots ----
 make_scatter <- function(xvar, xlab, panel_label) {
   rho <- cor(bg$evap_prop, bg[[xvar]], method = "spearman", use = "complete.obs")
   pval <- cor.test(bg$evap_prop, bg[[xvar]], method = "spearman")$p.value
@@ -519,10 +415,6 @@ figS1b <- make_scatter("med_income", "Median household income ($)", "b")
 figS1c <- make_scatter("pct_renter", "Renter proportion", "c")
 figS1d <- make_scatter("mean_ndvi", "Mean NDVI (tree/vegetation cover)", "d")
 
-
-# 10. EXPORT FIGURES
-
-## Figure 1: Bivariate choropleth + inset legend
 fig1_final <- fig1 + inset_element(fig1_legend, left = 0.02, bottom = 0.02,
                                    right = 0.25, top = 0.25)
 
@@ -534,7 +426,6 @@ png(here("results", "P2_Figure1_bivariate_choropleth.png"), width = 7, height = 
 print(fig1_final)
 dev.off()
 
-## Figure 2: LISA cluster map
 pdf(here("results", "P2_Figure2_LISA_double_exposure.pdf"), width = 7, height = 7)
 print(fig2)
 dev.off()
@@ -542,8 +433,6 @@ dev.off()
 png(here("results", "P2_Figure2_LISA_double_exposure.png"), width = 7, height = 7, units = "in", res = 300)
 print(fig2)
 dev.off()
-
-## Figure S1: Scatterplots
 
 figS1 <- (figS1a + figS1b) / (figS1c + figS1d)
 s1_w <- 8; s1_h <- 7
@@ -555,8 +444,6 @@ dev.off()
 png(here("results", "P2_FigureS1_scatterplots.png"), width = s1_w, height = s1_h, units = "in", res = 300)
 print(figS1)
 dev.off()
-
-## ---- Figure S3: NDVI vs tmax scatter (mediator check) ----
 
 rho_nt <- cor(bg$mean_ndvi, bg$mean_tmax, method = "spearman", use = "complete.obs")
 pval_nt <- cor.test(bg$mean_ndvi, bg$mean_tmax, method = "spearman")$p.value
