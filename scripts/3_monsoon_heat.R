@@ -7,11 +7,10 @@ library(splines)
 
 bg_sf <- st_read(here("data", "Q1 Data Shapefile", "pima_Q1_data.shp"))
 
-#Dropping empty polygons
+# Dropping empty polygons
 bg_sf <- bg_sf[bg_sf$med_inc != 0 & !is.na(bg_sf$med_inc), ]
 bg_sf <- bg_sf[!is.na(bg_sf$evp_prp), ]
 
-## Keep only those inside urban areas
 UrbanAreas <- st_read(here("data", "2020_Arizona_Census_Urban_Areas", "2020_Arizona_Census_Urban_Areas.shp"))
 UrbanAreas <- st_transform(UrbanAreas, st_crs(bg_sf))
 UrbanAreas <- st_make_valid(UrbanAreas)
@@ -20,7 +19,6 @@ inside <- st_intersects(bg_centroids, st_union(UrbanAreas), sparse = FALSE)[, 1]
 bg_sf <- bg_sf[inside, ]
 bg <- data.frame(bg_sf)
 
-## Rename columns to match the simulated dataset
 colnames(bg)[colnames(bg) == "geoid20"]   <- "GEOID"
 colnames(bg)[colnames(bg) == "evp_prp"]   <- "evap_prop"
 colnames(bg)[colnames(bg) == "med_inc"]    <- "med_income"
@@ -30,7 +28,6 @@ colnames(bg)[colnames(bg) == "pct_rnt"]    <- "pct_renter"
 colnames(bg)[colnames(bg) == "pct_sfr"]    <- "pct_sfh"
 colnames(bg)[colnames(bg) == "covennt"]    <- "covenant"
 
-## Compute centroids for lon/lat
 bg_sf <- st_as_sf(bg)
 bg_sf <- st_transform(bg_sf, 4326)
 coords <- st_coordinates(st_centroid(bg_sf))
@@ -38,18 +35,13 @@ bg$lon <- coords[, 1]
 bg$lat <- coords[, 2]
 bg_sf <- st_make_valid(bg_sf)
 
-# 2. DOWNLOAD HOURLY WEATHER DATA (AZMET + NWS Tucson)
-## We can also download data from the AZMET raw data archive:
-## https://cals.arizona.edu/azmet/. For now, we pull NWS 
-## Tucson (TUS) via the Iowa Environmental Mesonet (IEM) ASOS archive.
+# (AZMET + NWS Tucson)
 dir.create(here("data", "weather"), recursive = TRUE, showWarnings = FALSE)
 wx_path <- here("data", "weather", "tucson_hourly.csv")
 
 if (!file.exists(wx_path)) {
   
-  cat("=== Downloading hourly weather data ===\n")
-  
-  ## NWS Tucson International Airport (KTUS)
+  # NWS Tucson International Airport (KTUS)
   years <- 2018:2026
   wx_list <- list()
   
@@ -72,8 +64,6 @@ if (!file.exists(wx_path)) {
   
   if (length(wx_list) > 0) {
     wx <- do.call(rbind, wx_list)
-    
-    ## Clean columns
     wx$tmpf <- as.numeric(wx$tmpf)
     wx$relh <- as.numeric(wx$relh)
     wx$datetime <- as.POSIXct(wx$valid, format = "%Y-%m-%d %H:%M", tz = "America/Phoenix")
@@ -82,15 +72,9 @@ if (!file.exists(wx_path)) {
     wx$year <- as.integer(format(wx$datetime, "%Y"))
     wx$month <- as.integer(format(wx$datetime, "%m"))
     wx$doy <- as.integer(format(wx$datetime, "%j"))
-    
-    ## Remove rows with missing temp or RH
     wx <- wx[!is.na(wx$tmpf) & !is.na(wx$relh), ]
-    
-    ## Convert temp to C for consistency
     wx$temp_c <- (wx$tmpf - 32) * 5 / 9
-    
     write.csv(wx, wx_path, row.names = FALSE)
-    cat("Weather data saved:", nrow(wx), "hourly observations\n")
   } else {
     stop("Weather download failed")
   }
@@ -99,15 +83,9 @@ if (!file.exists(wx_path)) {
 wx <- read.csv(wx_path, stringsAsFactors = FALSE)
 wx$datetime <- as.POSIXct(wx$datetime, tz = "America/Phoenix")
 wx$date <- as.Date(wx$date)
-cat("Weather observations loaded:", nrow(wx), "\n")
 
-# 3. COOLER FAILURE DAY IDENTIFICATION
-
-# We flag hours where RH > 30% AND temperature > 95°F
-# co-occur. These are the hours when a swamp cooler
-# cannot meaningfully cool a home.
-
-## Stull (2011) wet-bulb approximation
+# Cooler failure days
+# Stull (2011) wet-bulb approximation
 calc_twet <- function(temp_c, rh_pct) {
   temp_c * atan(0.151977 * (rh_pct + 8.313659)^0.5) +
     atan(temp_c + rh_pct) -
@@ -116,33 +94,22 @@ calc_twet <- function(temp_c, rh_pct) {
     4.686035
 }
 
-## Supply air temperature
-## ASHRAE Handbook: HVAC Systems and Equipment
-## Chapter: Evaporative Air-Cooling Equipment
-## saturation effectiveness
-## T_supply = T_db - eta * (T_db - T_wb)
-## - T_db (dry-bulb temperature)
-## - T_wb (wet-bulb temperature)
-## - eta (saturation efficiency)
-calc_supply <- function(temp_c, rh_pct, eta = 0.85) {
+calc_supply <- function(temp_c, rh_pct, eta = 0.65) {
   twet <- calc_twet(temp_c, rh_pct)
   temp_c - eta * (temp_c - twet)
 }
 
-#Is supp temp beyond the ASHRAE comfort threshold (>27C)
 eta_values <- c(0.5, 0.6, 0.7, 0.8)
 
-## Compute failure for each eta
+# Compute failure for each eta
 for (eta_val in eta_values) {
   col <- paste0("failure_eta", eta_val * 10)
   wx[[col]] <- calc_supply(wx$temp_c, wx$relh, eta = eta_val) > 27
 }
 
-## Primary analysis uses eta = 0.65
+# Primary analysis uses eta = 0.65
 wx$failure <- calc_supply(wx$temp_c, wx$relh, eta = 0.65) > 27  # TRUE = failure
-#wx$failure <- wx$relh > 30 & wx$tmpf > 95
 
-## Aggregate to daily level
 daily <- aggregate(
   cbind(failure_hours = failure, max_temp = tmpf, max_rh = relh) ~ date + year + month + doy,
   data = wx,
@@ -161,30 +128,19 @@ colnames(daily_rhmax)[2] <- "rh_max"
 daily <- merge(daily_fail, daily_tmax, by = "date")
 daily <- merge(daily, daily_rhmax, by = "date")
 
-## Binary: is this a failure day? (at least 1 hour of co-occurrence)
 daily$failure_day <- as.integer(daily$failure_hours > 0)
 
-cat("\n=== COOLER FAILURE SUMMARY (eta = 0.85) ===\n")
-cat("Total days analyzed:", nrow(daily), "\n")
-cat("Total failure days:", sum(daily$failure_day), "\n")
-cat("Failure rate:", round(mean(daily$failure_day) * 100, 1), "%\n")
-
-
-# 4. TABLE 1: COOLER FAILURE CLIMATOLOGY
-
-## Assign season: pre-monsoon (May-Jun), monsoon (Jul-Sep), post-monsoon (Oct)
+# Assign season: pre-monsoon (May-Jun), monsoon (Jul-Sep), post-monsoon (Oct)
 daily$season <- "Pre-monsoon"
 daily$season[daily$month >= 7 & daily$month <= 9] <- "Monsoon"
 daily$season[daily$month == 10] <- "Post-monsoon"
 daily$season <- factor(daily$season, levels = c("Pre-monsoon", "Monsoon", "Post-monsoon"))
 
-## Annual summary by season
 annual_season <- aggregate(
   cbind(failure_days = failure_day, total_failure_hours = failure_hours) ~ year + season,
   data = daily, FUN = sum
 )
 
-## Longest consecutive failure streak per year-season
 streak_fun <- function(x) {
   if (sum(x) == 0) return(0)
   r <- rle(x)
@@ -196,7 +152,6 @@ colnames(streaks)[3] <- "longest_streak"
 
 annual_season <- merge(annual_season, streaks, by = c("year", "season"))
 
-## Mean across years
 clim <- aggregate(
   cbind(failure_days, total_failure_hours, longest_streak) ~ season,
   data = annual_season, FUN = mean
@@ -211,12 +166,9 @@ colnames(clim_se)[2:4] <- paste0(colnames(clim_se)[2:4], "_se")
 table1 <- merge(clim, clim_se, by = "season")
 table1[, 2:7] <- round(table1[, 2:7], 1)
 
-cat("\n=== TABLE 1: Cooler failure climatology ===\n")
-print(table1)
-
 write.csv(table1, here("results", "P3_Table1_failure_climatology.csv"), row.names = FALSE)
 
-## Sensitivity table: failure days per year across eta values
+# Sensitivity table
 eta_sensitivity <- lapply(eta_values, function(eta_val) {
   col <- paste0("failure_eta", eta_val * 10)
   daily_eta <- aggregate(wx[[col]] ~ date, data = wx, FUN = sum)
@@ -231,38 +183,17 @@ eta_sensitivity <- lapply(eta_values, function(eta_val) {
              max = max(annual$failure_day))
 })
 eta_sensitivity <- do.call(rbind, eta_sensitivity)
-
-cat("\n=== SENSITIVITY: Failure days by eta ===\n")
-print(eta_sensitivity)
-
 write.csv(eta_sensitivity, here("results", "P3_Table_eta_sensitivity.csv"), row.names = FALSE)
-
-## Also save full annual breakdown for supplement
 write.csv(annual_season, here("results", "P3_TableS1_annual_season_breakdown.csv"), row.names = FALSE)
 
-# 5. COMPOUND EXPOSURE INDEX
-# Compound exposure = evap cooler prevalence x failure frequency.
-# Failure frequency is city-wide (one weather station), so the
-# spatial variation comes entirely from cooler prevalence.
-# We compute mean annual failure days across all years,
-# then multiply by block group evap prevalence.
-
+# Compound exposure
 mean_failure_days <- mean(aggregate(failure_day ~ year, data = daily, FUN = sum)$failure_day)
-cat("\nMean annual failure days:", round(mean_failure_days, 1), "\n")
-
-## Compound exposure: proportion of households affected x days of failure
 bg$compound_exposure <- bg$evap_prop * mean_failure_days
-
-## Quartiles
 bg$exposure_q <- cut(bg$compound_exposure,
                      breaks = quantile(bg$compound_exposure, probs = 0:4/4),
                      labels = c("Q1 (lowest)", "Q2", "Q3", "Q4 (highest)"),
                      include.lowest = TRUE)
 
-cat("Compound exposure range:", round(range(bg$compound_exposure), 1), "\n")
-
-
-# 6. TABLE 2: DEMOGRAPHICS OF HIGH VS LOW EXPOSURE
 high_exp <- bg[bg$exposure_q == "Q4 (highest)", ]
 low_exp  <- bg[bg$exposure_q == "Q1 (lowest)", ]
 
@@ -280,36 +211,20 @@ table2 <- data.frame(
     signif(wilcox.test(high_exp[[v]], low_exp[[v]])$p.value, 3)
   })
 )
-
-cat("\n=== TABLE 2: High vs. low compound exposure ===\n")
-print(table2)
-
 write.csv(table2, here("results", "P3_Table2_demographics_by_exposure.csv"), row.names = FALSE)
 
-# 7. SPATIAL WEIGHTS AND MORAN'S I ON COMPOUND EXPOSURE
+# Spatial weights
 coords <- cbind(bg$lon, bg$lat)
 nb <- knn2nb(knearneigh(coords, k = 5))
 lw <- nb2listw(nb, style = "W")
-
 moran_exp <- moran.test(bg$compound_exposure, lw)
-cat("\nMoran's I on compound exposure:", round(moran_exp$estimate[1], 3), "\n")
-cat("p-value:", signif(moran_exp$p.value, 3), "\n")
 
-
-# 8. FIGURES
 dir.create(here("results"), recursive = TRUE, showWarnings = FALSE)
-
-## ---- Figure 1: Heatmap of hourly conditions across summer ----
-## x = day of year, y = hour of day, fill = co-occurrence of heat + humidity
-## Failure zone shaded
-
-## Aggregate to mean conditions per DOY x hour (across years)
 heatmap_data <- aggregate(
   cbind(mean_temp = temp_c, mean_rh = relh, fail_prop = failure) ~ doy + hour,
   data = wx, FUN = mean, na.rm = TRUE
 )
 
-## Panel a: temperature
 fig1a <- ggplot(heatmap_data, aes(x = doy, y = hour, fill = mean_temp)) +
   geom_tile() +
   scale_fill_gradientn(colors = c("#2c7bb6", "#abd9e9", "#fee090", "#d73027"),
@@ -322,7 +237,6 @@ fig1a <- ggplot(heatmap_data, aes(x = doy, y = hour, fill = mean_temp)) +
         plot.title = element_text(size = 10, face = "bold")) +
   labs(x = "Day of year", y = "Hour", title = "a")
 
-## Panel b: relative humidity
 fig1b <- ggplot(heatmap_data, aes(x = doy, y = hour, fill = mean_rh)) +
   geom_tile() +
   scale_fill_gradientn(colors = c("#f7f7f7", "#74add1", "#313695"),
@@ -335,7 +249,6 @@ fig1b <- ggplot(heatmap_data, aes(x = doy, y = hour, fill = mean_rh)) +
         plot.title = element_text(size = 10, face = "bold")) +
   labs(x = "Day of year", y = "Hour", title = "b")
 
-## Panel c: failure probability (proportion of years with failure at this DOY x hour)
 fig1c <- ggplot(heatmap_data, aes(x = doy, y = hour, fill = fail_prop)) +
   geom_tile() +
   scale_fill_gradientn(colors = c("#f7f7f7", "#fc8d59", "#b30000"),
@@ -358,7 +271,6 @@ png(here("results", "P3_Figure1_heatmap.png"), width = 8, height = 10, units = "
 print(fig1)
 dev.off()
 
-## ---- Figure 2: Compound exposure map ----
 bg_sf2 <- st_as_sf(bg)
 if (is.na(st_crs(bg_sf2))) bg_sf2 <- st_set_crs(bg_sf2, 4326)
 bg_sf2 <- st_make_valid(bg_sf2)
@@ -385,9 +297,7 @@ png(here("results", "P3_Figure2_compound_exposure_map.png"), width = 7, height =
 print(fig2)
 dev.off()
 
-## ---- Figure S1: Failure days time series ----
 wx$failure_065 <- calc_supply(wx$temp_c, wx$relh, eta = 0.65) > 27
-
 daily_065 <- aggregate(failure_065 ~ date, data = wx, FUN = sum)
 colnames(daily_065) <- c("date", "failure_hours")
 daily_065$year <- as.integer(format(as.Date(daily_065$date), "%Y"))
@@ -410,7 +320,6 @@ png(here("results", "P3_FigureS1_annual_failure_days.png"), width = 6, height = 
 print(figS1)
 dev.off()
 
-## ---- Figure S2: Scatter of evap prevalence vs compound exposure ----
 figS2 <- ggplot(bg, aes(x = evap_prop, y = compound_exposure)) +
   geom_point(size = 1.2, alpha = 0.5, color = "grey30") +
   geom_smooth(method = "lm", se = TRUE, color = "#d73027",
@@ -430,8 +339,6 @@ png(here("results", "P3_FigureS2_scatter_compound.png"), width = 5, height = 5, 
 print(figS2)
 dev.off()
 
-## ---- Figure S3: Eta sensitivity heatmaps ----
-## Show failure probability heatmap for each eta value
 eta_heatmaps <- lapply(eta_values, function(eta_val) {
   col <- paste0("failure_eta", eta_val * 10)
   hd_eta <- aggregate(wx[[col]] ~ doy + hour, data = wx, FUN = mean, na.rm = TRUE)
@@ -460,7 +367,6 @@ png(here("results", "P3_FigureS3_eta_heatmaps.png"), width = 12, height = 7, uni
 print(figS3)
 dev.off()
 
-## ---- Figure S4: Eta sensitivity bar chart ----
 figS4 <- ggplot(eta_sensitivity, aes(x = factor(eta), y = mean_failure_days)) +
   geom_col(fill = "#c47a4a", alpha = 0.7, width = 0.6) +
   geom_errorbar(aes(ymin = pmax(mean_failure_days - sd, 0),
