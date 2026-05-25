@@ -26,8 +26,6 @@ e1 <- new.env(); if (file.exists("ws_1_equity.RData")) load("ws_1_equity.RData",
 e2 <- new.env(); if (file.exists("ws_2_heat.RData")) load("ws_2_heat.RData", envir = e2)
 e3 <- new.env(); if (file.exists("ws_3_monsoon.RData")) load("ws_3_monsoon.RData", envir = e3)
 e4 <- new.env(); if (file.exists("ws_4_projections.RData")) load("ws_4_projections.RData", envir = e4)
-e5 <- new.env(); if (file.exists("ws_5_health.RData")) load("ws_5_health.RData", envir = e5)
-e6 <- new.env(); if (file.exists("ws_6_projected_health.RData")) load("ws_6_projected_health.RData", envir = e6)
 e7 <- new.env(); if (file.exists("ws_7_synthesis.RData")) load("ws_7_synthesis.RData", envir = e7)
 if (!exists("bg_sf", envir = e1) && file.exists("workspace.RData")) load("workspace.RData", envir = e1)
 
