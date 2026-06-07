@@ -58,20 +58,19 @@ plm <- list(t = 10, r = 10, b = 50, l = 60)
 
 ::: {style="text-align:center; padding-top:8%;"}
 [*Who depends on swamp coolers in Tucson?*]{style="font-family:Fraunces; font-size:3em; color:#2c2418; font-style:italic;"}
-[Evaporative coolers in Tucson. Here we show who depends on them, where they fail, and what might happen next...]{style="font-family:Figtree; font-size:0.85em; color:#8a7d6b; margin-top:2em; display:block;"}
+[This website provides an overview on the geographical and socioeconomic distribution of evaporative coolers in Tucson, Arizona. We show basic information describing who depends on them, where and when they fail, and what might happen over upcoming decades]{style="font-family:Figtree; font-size:0.85em; color:#8a7d6b; margin-top:2em; display:block;"}
 :::
 
-This is a story about swamp coolers. About who depends on them, where they fail, and what that means for the people inside those homes. They are cheap to run, great in dry heat, and the most common cooling technology in the city. But they fail when humidity rises. They pull unfiltered air indoors. And they concentrate in the neighborhoods that can least afford an alternative. **We mapped them for the first time.** This is what we found...
+This is a story about swamp coolers. About who depends on them, when and where they fail, and what that means for the people inside those homes. Swamp coolers are cheap to run, great in dry heat, and a predominant cooling technology in the city. Swamp coolers fail when humidity rises. They also pull unfiltered air indoors. They concentrate in the neighborhoods that can least afford an alternative and probably even to maintain them. **We mapped them for the first time.** This is what we found...
 
-
-We start with the most basic questions. Where are the swamp coolers? Who lives in those neighborhoods?
-
-<hr style="border: none; border-top: 1px solid #e2ddd6; margin: 2rem 0;">
 
 ## Where the swamp coolers are {.smaller}
 
+<hr style="border: none; border-top: 1px solid #e2ddd6; margin: 2rem 0;">
+
+
 :::: {.columns}
-::: {.column width="55%"}
+::: {.column width="50%"}
 ```{r}
 sf1 <- st_make_valid(e1$bg_sf); bg1 <- e1$bg
 pvars <- c("evap_prop","med_income","pct_minority","pct_renter","med_year_built")
@@ -79,14 +78,14 @@ plabs <- c("Evap. prevalence","Income ($)","Minority (%)","Renter (%)","Year bui
 cmap(sf1, "evap_prop", "Evap. cooling", pvars, plabs, h = "480px")
 ```
 :::
+
+::: {.column width="5%"}
+:::
+
 ::: {.column width="45%"}
-Click any neighborhood. Red means more swamp coolers. Blue means fewer.
+The south and west sides of the city have the highest prevalence of swamp coolers. The foothills and east side carry the lowest prevalence. This distribution is not random. In fact, and as we show below, swamp cooler prevalence closely tracks income, race, housing age almost perfectly.
 
-The south and west sides of the city carry the highest prevalence. The foothills and east side carry the lowest.
-
-This is not random. It tracks income, race, housing age, and renter status almost perfectly.
-
-The spatial gradient is stark. Evaporative cooler prevalence ranges from near zero in the Catalina Foothills to over 60% in parts of the south side. The pattern is immediately recognizable to anyone who knows Tucson.
+The spatial gradient is stark. Evaporative cooler prevalence ranges from near zero in the north of the city, to over 60% in parts of the center and south side. The pattern is immediately recognizable to anyone who knows Tucson.  Sociodemographic gradients explicitly explain these spatial patterns, and these associations can be easily quantified.
 :::
 ::::
 
@@ -110,7 +109,7 @@ p <- ggplot(bg1, aes(x = med_income/1000, y = evap_pct,
 ggplotly(p, tooltip="text")
 ```
 ::: {style="text-align:justify; padding-top:8%;"}
-Lower-income neighborhoods have dramatically higher evaporative cooler prevalence. This is not a choice. It is a constraint. Swamp coolers cost a fraction of what refrigerated AC costs to install and run. They persist where the money to replace them does not.
+Income shows one of the most interesting patterns relative to swamp cooler prevalence. Lower-income neighborhoods have dramatically higher evaporative cooler than blocks where higher income families live. In modern Tucson, swamp coolers are likely not a choice but a constraint. Swamp coolers cost a fraction of what refrigerated AC costs to install and run. They persist where the money to replace them does not.
 :::
 :::
 ::: {.column width="33%"}
@@ -129,7 +128,7 @@ p <- ggplot(bg1, aes(x = pct_minority, y = evap_pct,
 ggplotly(p, tooltip="text")
 ```
 ::: {style="text-align:justify; padding-top:8%;"}
-XXX
+Swamp coolers are not randomly distributed throughout Tucson with respect to race. We estimated the proportion of minority population in each block based on non-white residents. The prevalence of swamp increases in neighborhoods where with minority population is higher. This component suggest that race functions as a marker that explains the spatial distribution of swamp coolers throughout the city.
 :::
 
 :::
@@ -149,7 +148,7 @@ p <- ggplot(bg1, aes(x = med_year_built, y = evap_pct,
 ggplotly(p, tooltip="text")
 ```
 ::: {style="text-align:justify; padding-top:8%;"}
-XXX
+While the income and race summarize the current sociodemigraphic context of the residents and their association with swamp cooler prevalence, housing stock also provides an alternative lense for which swamp coolers should be understood. Afterall, swamp coolers are features of the houses themselves. Our findings suggest that swamp coolers are more likely in neighboorhods with older housing stock, sharply decreasing in newer neighboorhods.
 :::
 :::
 ::::
@@ -159,9 +158,7 @@ XXX
 :::: {.columns}
 
 ::: {.column width="45%"}
-Our clustering analysis confirms that this pattern is not random. Red areas are clusters of high evaporative cooler prevalence surrounded by other high-prevalence neighborhoods. Blue areas are clusters of low prevalence.
-
-The spatial autocorrelation is statistically significant. Swamp cooler dependence is a neighborhood-level phenomenon, not a household-level one.
+Our clustering analysis confirms that the distrivutional pattern in swamp coolers is not random. In the figure, we show that neighboorhods with statistically high evaporative cooler prevalence (red areas) tend to be surrounded by other high-prevalence neighborhoods. Blue areas are clusters of low prevalence. These clusters of low prevalence track areas near the periphery of the city, Our analyses also suggest that swamp cooler dependence is a neighborhood-level phenomenon, not a household-level one.
 :::
 
 ::: {.column width="55%"}
@@ -201,7 +198,9 @@ leaflet(sf1, width="100%", height="480px") |>
 :::
 ::: {.column width="45%"}
 
-Covenants shaped who could build wealth through homeownership and where investment flowed for decades. The housing stock in covenanted areas aged without the renovations that wealthier neighborhoods received. The residents who moved in after the covenants were lifted had less capital to upgrade cooling systems.
+So far, we have described sociodemographic characteristics of those who use and don't use swamp coolers. We have also looked into descriptors of the housing stock and detected clusters of  unusually high and low evaporative cooler prevalence. However, we have not examined for historical patterns that might explain this distribution. Redlining, housing discrimination, offers is window that helps understand if modern patterns in swamp cooler distribution in Tucson.
+
+For a long time, covenants shaped who could build wealth through homeownership and where investment flowed. Covenants restricted who could purchase and live in particular areas of the city. These covenants were outruled in the 70s but their marks are still evident in today's housing stock, the distribution of residents throughout the city, the conditions they live in, their health, among others. The housing stock in covenanted areas aged without the renovations that wealthier neighborhoods received. The residents who moved in after the covenants were lifted had less capital to upgrade cooling systems.
 
 ```{r}
 #| output: asis
