@@ -46,7 +46,7 @@ if (!file.exists(lst_path)) {
   prism_set_dl_dir(prism_dir)
   
   # Download monthly tmax for Jun, Jul, Aug, Sep 2023
-  get_prism_monthlys(type = "tmax", years = 2023, mon = 6:9, keepZip = FALSE)
+  get_prism_monthlys(type = "tmax", years = c(2019:2023), mon = 5:9, keepZip = FALSE, resolution = "800m")
   
   pd <- prism_archive_ls()
   cat("PRISM files downloaded:", length(pd), "\n")
