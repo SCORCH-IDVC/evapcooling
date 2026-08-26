@@ -22,7 +22,7 @@ acs <- get_acs(
   geography = "block group",
   state = "AZ",
   county = "Pima",
-  year = 2023,
+  year = 2024,
   survey = "acs5",
   variables = c(
     med_income = "B19013_001",
@@ -55,4 +55,4 @@ bg_sf$pop_new <- NULL
 # Overwrite the default shapefile
 st_write(bg_sf, original, delete_dsn = TRUE)
 cat("Updated shapefile written to:", original, "\n")
-cat("All scripts will now use 2019-2023 ACS data.\n")
+cat("All scripts will now use ACS5 data.\n")

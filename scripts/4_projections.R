@@ -82,6 +82,11 @@ baseline_failure_se <- sd(obs_annual$failure_day) / sqrt(nrow(obs_annual))
 baseline_failure_min <- min(obs_annual$failure_day)
 baseline_failure_max <- max(obs_annual$failure_day)
 
+cat("\n=== OBSERVED BASELINE (eta = 0.65) ===\n")
+cat("Mean annual failure days:", round(baseline_failure_days, 1), "\n")
+cat("SE:", round(baseline_failure_se, 1), "\n")
+cat("Range:", baseline_failure_min, "-", baseline_failure_max, "\n")
+
 # NEX-GDDP-CMIP6 projections
 dir.create(here("data", "cmip6"), recursive = TRUE, showWarnings = FALSE)
 projections_path <- here("data", "cmip6", "tucson_projections.csv")
@@ -89,7 +94,6 @@ projections_path <- here("data", "cmip6", "tucson_projections.csv")
 if (!file.exists(projections_path)) {
   cat("=== Downloading NEX-GDDP-CMIP6 projections ===\n")
   
-  # ~ Tucson coordinates
   tuc_lat <- 32.25
   tuc_lon <- -111.0
   models <- c("ACCESS-CM2", "GFDL-ESM4", "IPSL-CM6A-LR",
@@ -125,14 +129,11 @@ if (!file.exists(projections_path)) {
             if (!inherits(result, "try-error") && file.size(tmp) > 10000) {
               nc_try <- try({
                 r <- rast(tmp)
-                
-                # Extract the Tucson pixel for Jun-Sep
                 r <- rotate(r)
                 cell_id <- cellFromXY(r, cbind(tuc_lon, tuc_lat))
                 vals <- r[cell_id]
                 vals <- as.numeric(vals)
                 
-                # Time: layer count = days in year. Subset to Jun-Sep (DOY 152-273)
                 is_leap <- (yr %% 4 == 0 & yr %% 100 != 0) | (yr %% 400 == 0)
                 jun1 <- ifelse(is_leap, 153, 152)
                 sep30 <- ifelse(is_leap, 274, 273)
@@ -179,18 +180,20 @@ proj_wide <- merge(proj_tmax, proj_hurs,
 
 # Compute model historical bias in hurs
 hist_model_rh <- mean(proj_wide$hurs[proj_wide$period == "historical"], na.rm = TRUE)
-hist_obs_rh <- mean(wx$relh[wx$month %in% 6:9], na.rm = TRUE)  # from KTUS
+hist_obs_rh <- mean(wx$relh[wx$month %in% 6:9], na.rm = TRUE)
 rh_bias <- hist_model_rh - hist_obs_rh
+cat("RH bias (model - observed):", round(rh_bias, 1), "\n")
+
 proj_wide$hurs_corrected <- proj_wide$hurs - rh_bias
 proj_wide$tmax_f <- proj_wide$tasmax_K * 9/5 - 459.67
-proj_wide$tmax_c <- (proj_wide$tmax_f - 32)/1.8
+proj_wide$tmax_c <- (proj_wide$tmax_f - 32) / 1.8
 
 for (eta_val in eta_values) {
   col <- paste0("failure_eta", eta_val * 10)
-  proj_wide[[col]] <- calc_supply(proj_wide$tmax_c, proj_wide$hurs, eta = eta_val) > 27
+  proj_wide[[col]] <- calc_supply(proj_wide$tmax_c, proj_wide$hurs_corrected, eta = eta_val) > 27
 }
 
-proj_wide$failure <- calc_supply(proj_wide$tmax_c, proj_wide$hurs) > 27  # TRUE = failure
+proj_wide$failure <- calc_supply(proj_wide$tmax_c, proj_wide$hurs_corrected) > 27
 annual_fail <- aggregate(failure ~ model + ssp + period + year,
                          data = proj_wide, FUN = sum)
 colnames(annual_fail)[5] <- "failure_days"
@@ -208,36 +211,55 @@ period_fail_by_eta <- lapply(eta_values, function(eta_val) {
 })
 period_fail_all_eta <- do.call(rbind, period_fail_by_eta)
 
-# Fail by period and date
-summary_by_period <- function(df) {
-  data.frame(
-    median = round(median(df$failure_days), 1),
-    p10 = round(quantile(df$failure_days, 0.1), 1),
-    p90 = round(quantile(df$failure_days, 0.9), 1),
-    n_models = length(unique(df$model))
-  )
-}
+# Delta method
+hist_fail <- period_fail[period_fail$period == "historical", ]
+colnames(hist_fail)[3] <- "hist_period"
+colnames(hist_fail)[4] <- "hist_failure"
+future_fail <- period_fail[period_fail$period != "historical", ]
+future_fail <- merge(future_fail, hist_fail[, c("model", "hist_failure")], by = "model")
+future_fail$delta <- future_fail$failure_days - future_fail$hist_failure
 
-table1_list <- list()
-for (s in c("ssp245", "ssp585")) {
-  for (p in c("historical", "near", "mid", "far")) {
-    sub <- period_fail[period_fail$ssp == s & period_fail$period == p, ]
-    if (nrow(sub) == 0 && p == "historical") {
-      sub <- period_fail[period_fail$period == "historical", ]
-    }
-    if (nrow(sub) > 0) {
-      row <- summary_by_period(sub)
-      row$ssp <- s
-      row$period <- p
-      table1_list[[length(table1_list) + 1]] <- row
-    }
-  }
-}
-table1 <- do.call(rbind, table1_list)
-table1$label <- paste0(table1$median, " [", table1$p10, "-", table1$p90, "]")
-write.csv(table1, here("results", "P4_Table1_projected_failure_days.csv"), row.names = FALSE)
+delta_summary <- aggregate(delta ~ ssp + period, data = future_fail,
+                           FUN = function(x) c(median = median(x),
+                                               p10 = quantile(x, 0.1),
+                                               p90 = quantile(x, 0.9)))
+delta_df <- data.frame(
+  ssp = delta_summary$ssp,
+  period = delta_summary$period,
+  delta_median = delta_summary$delta[, 1],
+  delta_p10 = delta_summary$delta[, 2],
+  delta_p90 = delta_summary$delta[, 3]
+)
 
-# Sensitivity table: projected failure days across eta values
+cat("\n=== DELTA SUMMARY ===\n")
+print(delta_df)
+
+write.csv(delta_df, here("results", "P4_delta_summary.csv"), row.names = FALSE)
+
+# Table 1: Delta-corrected projected failure days
+table1_corrected <- delta_df
+table1_corrected$proj_median <- round(baseline_failure_days + delta_df$delta_median, 1)
+table1_corrected$proj_lo <- round(baseline_failure_days + delta_df$delta_p10, 1)
+table1_corrected$proj_hi <- round(baseline_failure_days + delta_df$delta_p90, 1)
+table1_corrected$label <- paste0(table1_corrected$proj_median,
+                                 " [", table1_corrected$proj_lo, "-", table1_corrected$proj_hi, "]")
+
+table1_corrected <- rbind(
+  data.frame(ssp = "observed", period = "baseline",
+             delta_median = 0, delta_p10 = 0, delta_p90 = 0,
+             proj_median = round(baseline_failure_days, 1),
+             proj_lo = round(baseline_failure_days, 1),
+             proj_hi = round(baseline_failure_days, 1),
+             label = as.character(round(baseline_failure_days, 1))),
+  table1_corrected
+)
+
+cat("\n=== TABLE 1: Delta-corrected projected failure days ===\n")
+print(table1_corrected[, c("ssp", "period", "label")])
+
+write.csv(table1_corrected, here("results", "P4_Table1_projected_failure_days.csv"), row.names = FALSE)
+
+# Sensitivity table: raw model failure days across eta values (supplement)
 eta_proj_sensitivity <- lapply(eta_values, function(eta_val) {
   pf <- period_fail_all_eta[period_fail_all_eta$eta == eta_val, ]
   rows <- list()
@@ -262,27 +284,7 @@ eta_proj_table <- do.call(rbind, eta_proj_sensitivity)
 eta_proj_table$label <- paste0(eta_proj_table$median, " [", eta_proj_table$p10, "-", eta_proj_table$p90, "]")
 write.csv(eta_proj_table, here("results", "P4_Table_eta_sensitivity.csv"), row.names = FALSE)
 
-# Delta method
-hist_fail <- period_fail[period_fail$period == "historical", ]
-colnames(hist_fail)[3] <- "hist_period"
-colnames(hist_fail)[4] <- "hist_failure"
-future_fail <- period_fail[period_fail$period != "historical", ]
-future_fail <- merge(future_fail, hist_fail[, c("model", "hist_failure")], by = "model")
-future_fail$delta <- future_fail$failure_days - future_fail$hist_failure
-
-delta_summary <- aggregate(delta ~ ssp + period, data = future_fail,
-                           FUN = function(x) c(median = median(x),
-                                               p10 = quantile(x, 0.1),
-                                               p90 = quantile(x, 0.9)))
-delta_df <- data.frame(
-  ssp = delta_summary$ssp,
-  period = delta_summary$period,
-  delta_median = delta_summary$delta[, 1],
-  delta_p10 = delta_summary$delta[, 2],
-  delta_p90 = delta_summary$delta[, 3]
-)
-
-# Project to block groups
+# Project to block groups using delta method
 for (i in seq_len(nrow(delta_df))) {
   s <- delta_df$ssp[i]
   p <- delta_df$period[i]
@@ -290,7 +292,6 @@ for (i in seq_len(nrow(delta_df))) {
   col_name <- paste0("exposure_", s, "_", p)
   bg[[col_name]] <- (baseline_failure_days + d) * bg$evap_prop
 }
-
 
 # Threshold crossing
 threshold <- 10
@@ -322,9 +323,12 @@ crossing_summary <- rbind(
   crossing_summary
 )
 
+cat("\n=== THRESHOLD CROSSING ===\n")
+print(crossing_summary)
+
 write.csv(crossing_summary, here("results", "P4_Table2_threshold_crossing.csv"), row.names = FALSE)
 
-# Demographys of newly vulnerable blocks
+# Demographics of newly vulnerable blocks
 col_far <- "exposure_ssp585_far"
 newly_vuln <- bg[bg[[col_far]] > threshold & !bg$above_now, ]
 already_vuln <- bg[bg$above_now, ]
@@ -346,31 +350,25 @@ tableS1 <- data.frame(
   })
 )
 
+cat("\n=== NEWLY VULNERABLE DEMOGRAPHICS ===\n")
+print(tableS1)
+
 write.csv(tableS1, here("results", "P4_TableS1_newly_vulnerable_demographics.csv"), row.names = FALSE)
 
+# ============================================================
+# FIGURES
+# ============================================================
+
 dir.create(here("results"), recursive = TRUE, showWarnings = FALSE)
-period_order <- c("historical", "near", "mid", "far")
-period_years <- c(2010, 2030, 2045, 2065)
 
-plot_data <- period_fail
-plot_data$period <- factor(plot_data$period, levels = period_order)
-plot_data$period_year <- period_years[match(plot_data$period, period_order)]
-
-ribbon_data <- aggregate(failure_days ~ ssp + period,
-                         data = plot_data,
-                         FUN = function(x) c(med = median(x),
-                                             lo = quantile(x, 0.1),
-                                             hi = quantile(x, 0.9)))
-ribbon_df <- data.frame(
-  ssp = ribbon_data$ssp,
-  period = ribbon_data$period,
-  median = ribbon_data$failure_days[, 1],
-  lo = ribbon_data$failure_days[, 2],
-  hi = ribbon_data$failure_days[, 3]
-)
-ribbon_df$period_year <- period_years[match(ribbon_df$period, period_order)]
-
-obs_point <- data.frame(period_year = 2020, failure_days = baseline_failure_days)
+# ---- Figure 1a: Delta-corrected fan chart ----
+ribbon_df <- delta_df
+ribbon_df$median <- baseline_failure_days + delta_df$delta_median
+ribbon_df$lo <- baseline_failure_days + delta_df$delta_p10
+ribbon_df$hi <- baseline_failure_days + delta_df$delta_p90
+ribbon_df$period_year <- c(2030, 2045, 2065, 2030, 2045, 2065)[
+  match(paste(ribbon_df$ssp, ribbon_df$period),
+        paste(rep(c("ssp245", "ssp585"), each = 3), rep(c("near", "mid", "far"), 2)))]
 
 fig1 <- ggplot() +
   # SSP2-4.5 ribbon
@@ -385,25 +383,26 @@ fig1 <- ggplot() +
               fill = "#d73027", alpha = 0.2) +
   geom_line(data = ribbon_df[ribbon_df$ssp == "ssp585", ],
             aes(x = period_year, y = median), color = "#d73027", linewidth = 1) +
-  # Observed baseline
-  geom_point(aes(x = 2020, y = baseline_by_eta[2,2]),
-             size = 3, shape = 18) +
-  geom_errorbar(aes(x = 2020, ymin = min(baseline_by_eta$baseline), ymax = max(baseline_by_eta$baseline)), width = 0.25, color = "grey30", linewidth = 0.4) +
-  #geom_hline(yintercept = baseline_failure_days, linetype = "dashed", color = "grey40") +
+  # Observed baseline with eta uncertainty
+  geom_point(aes(x = 2020, y = baseline_failure_days), size = 3, shape = 18) +
+  geom_errorbar(aes(x = 2020,
+                    ymin = min(baseline_by_eta$baseline),
+                    ymax = max(baseline_by_eta$baseline)),
+                width = 0.25, color = "grey30", linewidth = 0.4) +
   # Labels
   annotate("text", x = 2050, y = max(ribbon_df$hi[ribbon_df$ssp == "ssp585"]),
-           label = "SSP5 8.5", color = "#d73027", size = 3, hjust = 0) +
+           label = "SSP5-8.5", color = "#d73027", size = 3, hjust = 0) +
   annotate("text", x = 2050, y = max(ribbon_df$hi[ribbon_df$ssp == "ssp245"]),
-           label = "SSP2 4.5", color = "#2c7bb6", size = 3, hjust = 0) +
-  scale_x_continuous(breaks = c(2010, 2020, 2030, 2045, 2065),
-                     labels = c("Hist.", "Obs.", "2030", "2045", "2065")) +
-  ylim(0, max(ribbon_df$hi)) + 
+           label = "SSP2-4.5", color = "#2c7bb6", size = 3, hjust = 0) +
+  scale_x_continuous(breaks = c(2020, 2030, 2045, 2065),
+                     labels = c("Obs.", "2030s", "2040s", "2060s")) +
+  ylim(0, max(ribbon_df$hi) * 1.05) +
   theme_minimal(base_size = 9) +
   theme(panel.grid.minor = element_blank(),
         plot.title = element_text(size = 10, face = "bold")) +
-  labs(x = "", y = "Cooler failure days per summer",
-       title = "a")
+  labs(x = "", y = "Cooler failure days per summer", title = "a")
 
+# ---- Figure 1b: Map of projected compound exposure ----
 bg_sf2 <- st_as_sf(bg)
 if (is.na(st_crs(bg_sf2))) bg_sf2 <- st_set_crs(bg_sf2, 4326)
 bg_sf2 <- st_make_valid(bg_sf2)
@@ -422,9 +421,10 @@ fig2 <- ggplot(bg_sf2) +
         plot.title = element_text(size = 10, face = "bold")) +
   labs(title = "b")
 
+# ---- Figure 1c: Threshold crossing bar chart ----
 cross_plot <- crossing_summary[crossing_summary$ssp != "observed", ]
 cross_plot$period <- factor(cross_plot$period, levels = c("near", "mid", "far"))
-cross_plot$ssp_label <- ifelse(cross_plot$ssp == "ssp245", "SSP2 4.5", "SSP5 8.5")
+cross_plot$ssp_label <- ifelse(cross_plot$ssp == "ssp245", "SSP2-4.5", "SSP5-8.5")
 
 fig3 <- ggplot(cross_plot, aes(x = period, y = pct_above, fill = ssp_label)) +
   geom_col(position = "dodge", width = 0.6, alpha = 0.8) +
@@ -437,9 +437,9 @@ fig3 <- ggplot(cross_plot, aes(x = period, y = pct_above, fill = ssp_label)) +
   theme(panel.grid.minor = element_blank(),
         legend.position = c(0.15, 0.85),
         plot.title = element_text(size = 10, face = "bold")) +
-  labs(x = "", y = "% block groups above threshold",
-       title = "c")
+  labs(x = "", y = "% block groups above threshold", title = "c")
 
+# ---- Figure S1: Current vs future exposure maps ----
 figS1a <- ggplot(bg_sf2) +
   geom_sf(aes(fill = exposure_current), color = "white", size = 0.15) +
   scale_fill_gradientn(colors = c("#2c7bb6", "#abd9e9", "#fee090", "#d73027"),
@@ -460,6 +460,7 @@ figS1b <- ggplot(bg_sf2) +
         plot.title = element_text(size = 10, face = "bold")) +
   labs(title = "b  SSP5-8.5, 2060s")
 
+# ---- Figure S2: Eta sensitivity of projections ----
 eta_ssp585_far <- eta_proj_table[eta_proj_table$ssp == "ssp585", ]
 
 figS2 <- ggplot(eta_ssp585_far, aes(x = factor(period, levels = c("historical", "near", "mid", "far")),
@@ -468,10 +469,10 @@ figS2 <- ggplot(eta_ssp585_far, aes(x = factor(period, levels = c("historical", 
   geom_point(aes(y = median), size = 2) +
   geom_ribbon(aes(ymin = p10, ymax = p90, fill = factor(eta)), alpha = 0.08, color = NA) +
   scale_color_manual(values = c("0.5" = "#2c7bb6", "0.6" = "#5b8fa8",
-                                "0.7" = "#fee090", "0.8" = "#fc8d59", "0.9" = "#d73027"),
+                                "0.7" = "#fee090", "0.8" = "#fc8d59"),
                      name = "eta") +
   scale_fill_manual(values = c("0.5" = "#2c7bb6", "0.6" = "#5b8fa8",
-                               "0.7" = "#fee090", "0.8" = "#fc8d59", "0.9" = "#d73027"),
+                               "0.7" = "#fee090", "0.8" = "#fc8d59"),
                     name = "eta") +
   scale_x_discrete(labels = c("Hist.", "2030s", "2040s", "2060s")) +
   theme_minimal(base_size = 9) +
@@ -479,6 +480,7 @@ figS2 <- ggplot(eta_ssp585_far, aes(x = factor(period, levels = c("historical", 
         plot.title = element_text(size = 10, face = "bold")) +
   labs(x = "", y = "Cooler failure days per summer (SSP5-8.5)", title = "")
 
+# ---- Save all figures ----
 pdf(here("results", "P4_FigureS2_eta_sensitivity.pdf"), width = 7, height = 5)
 print(figS2)
 dev.off()
@@ -506,3 +508,5 @@ dev.off()
 png(here("results", "P4_FigureS1_current_vs_future_maps.png"), width = 10, height = 5, units = "in", res = 300)
 print(figS1)
 dev.off()
+
+cat("\n=== DONE ===\n")

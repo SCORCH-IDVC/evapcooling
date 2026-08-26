@@ -1,0 +1,6 @@
+"variable","high_mean","high_se","low_mean","low_se","wilcox_p"
+"Evap. prevalence",0.56,0.01,0,0,1.97e-52
+"Median income ($)",56778.58,1692.3,88366.36,3106.5,3.57e-14
+"Minority (%)",0.67,0.02,0.37,0.02,2.37e-21
+"Renter (%)",0.28,0.01,0.33,0.02,0.258
+"Year built",1966.7,1.04,1995.86,0.99,4.03e-40

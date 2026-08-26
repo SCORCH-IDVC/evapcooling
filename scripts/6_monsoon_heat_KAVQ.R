@@ -37,17 +37,17 @@ bg_sf <- st_make_valid(bg_sf)
 
 # (AZMET + NWS Tucson)
 dir.create(here("data", "weather"), recursive = TRUE, showWarnings = FALSE)
-wx_path <- here("data", "weather", "tucson_hourly.csv")
+wx_path <- here("data", "weather", "tucson_hourly_KAVQ.csv")
 
 if (!file.exists(wx_path)) {
   
-  # NWS Tucson International Airport (KTUS)
+  # KAVQ
   years <- 2016:2025
   wx_list <- list()
   
   for (yr in years) {
     url <- sprintf(
-      "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py?station=TUS&data=tmpf&data=relh&tz=America/Phoenix&format=onlycomma&latlon=no&elev=no&missing=M&trace=T&direct=no&report_type=3&year1=%d&month1=5&day1=1&year2=%d&month2=10&day2=1",
+      "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py?station=KAVQ&data=tmpf&data=relh&tz=America/Phoenix&format=onlycomma&latlon=no&elev=no&missing=M&trace=T&direct=no&report_type=3&year1=%d&month1=5&day1=1&year2=%d&month2=10&day2=1",
       yr, yr
     )
     tmp <- tempfile(fileext = ".csv")
@@ -166,7 +166,7 @@ colnames(clim_se)[2:4] <- paste0(colnames(clim_se)[2:4], "_se")
 table1 <- merge(clim, clim_se, by = "season")
 table1[, 2:7] <- round(table1[, 2:7], 1)
 
-write.csv(table1, here("results", "P3_Table1_failure_climatology.csv"), row.names = FALSE)
+write.csv(table1, here("results", "P3_Table1_failure_climatology_KAVQ.csv"), row.names = FALSE)
 
 # Sensitivity table
 eta_sensitivity <- lapply(eta_values, function(eta_val) {
@@ -183,8 +183,8 @@ eta_sensitivity <- lapply(eta_values, function(eta_val) {
              max = max(annual$failure_day))
 })
 eta_sensitivity <- do.call(rbind, eta_sensitivity)
-write.csv(eta_sensitivity, here("results", "P3_Table_eta_sensitivity.csv"), row.names = FALSE)
-write.csv(annual_season, here("results", "P3_TableS1_annual_season_breakdown.csv"), row.names = FALSE)
+write.csv(eta_sensitivity, here("results", "P3_Table_eta_sensitivity_KAVQ.csv"), row.names = FALSE)
+write.csv(annual_season, here("results", "P3_TableS1_annual_season_breakdown_KAVQ.csv"), row.names = FALSE)
 
 # Compound exposure
 mean_failure_days <- mean(aggregate(failure_day ~ year, data = daily, FUN = sum)$failure_day)
@@ -211,7 +211,7 @@ table2 <- data.frame(
     signif(wilcox.test(high_exp[[v]], low_exp[[v]])$p.value, 3)
   })
 )
-write.csv(table2, here("results", "P3_Table2_demographics_by_exposure.csv"), row.names = FALSE)
+write.csv(table2, here("results", "P3_Table2_demographics_by_exposure_KAVQ.csv"), row.names = FALSE)
 
 # Spatial weights
 coords <- cbind(bg$lon, bg$lat)
@@ -263,11 +263,11 @@ fig1c <- ggplot(heatmap_data, aes(x = doy, y = hour, fill = fail_prop)) +
   labs(x = "Day of year", y = "Hour", title = "c")
 
 fig1 <- fig1a / fig1b / fig1c
-pdf(here("results", "P3_Figure1_heatmap.pdf"), width = 8, height = 10)
+pdf(here("results", "P3_Figure1_heatmap_KAVQ.pdf"), width = 8, height = 10)
 print(fig1)
 dev.off()
 
-png(here("results", "P3_Figure1_heatmap.png"), width = 8, height = 10, units = "in", res = 300)
+png(here("results", "P3_Figure1_heatmap_KAVQ.png"), width = 8, height = 10, units = "in", res = 300)
 print(fig1)
 dev.off()
 
@@ -289,11 +289,11 @@ fig2 <- ggplot(bg_sf2) +
         plot.title = element_text(size = 10, face = "bold")) +
   labs(title = "")
 
-pdf(here("results", "P3_Figure2_compound_exposure_map.pdf"), width = 7, height = 7)
+pdf(here("results", "P3_Figure2_compound_exposure_map_KAVQ.pdf"), width = 7, height = 7)
 print(fig2)
 dev.off()
 
-png(here("results", "P3_Figure2_compound_exposure_map.png"), width = 7, height = 7, units = "in", res = 300)
+png(here("results", "P3_Figure2_compound_exposure_map_KAVQ.png"), width = 7, height = 7, units = "in", res = 300)
 print(fig2)
 dev.off()
 
@@ -312,11 +312,11 @@ figS1 <- ggplot(annual_065, aes(x = year, y = failure_day)) +
         plot.title = element_text(size = 10, face = "bold")) +
   labs(x = "Year", y = "Total failure days (May-Sep)", title = "")
 
-pdf(here("results", "P3_FigureS1_annual_failure_days.pdf"), width = 6, height = 4)
+pdf(here("results", "P3_FigureS1_annual_failure_days_KAVQ.pdf"), width = 6, height = 4)
 print(figS1)
 dev.off()
 
-png(here("results", "P3_FigureS1_annual_failure_days.png"), width = 6, height = 4, units = "in", res = 300)
+png(here("results", "P3_FigureS1_annual_failure_days_KAVQ.png"), width = 6, height = 4, units = "in", res = 300)
 print(figS1)
 dev.off()
 
@@ -331,11 +331,11 @@ figS2 <- ggplot(bg, aes(x = evap_prop, y = compound_exposure)) +
        y = "Compound exposure (prevalence x failure days)",
        title = "")
 
-pdf(here("results", "P3_FigureS2_scatter_compound.pdf"), width = 5, height = 5)
+pdf(here("results", "P3_FigureS2_scatter_compound_KAVQ.pdf"), width = 5, height = 5)
 print(figS2)
 dev.off()
 
-png(here("results", "P3_FigureS2_scatter_compound.png"), width = 5, height = 5, units = "in", res = 300)
+png(here("results", "P3_FigureS2_scatter_compound_KAVQ.png"), width = 5, height = 5, units = "in", res = 300)
 print(figS2)
 dev.off()
 
@@ -359,11 +359,11 @@ eta_heatmaps <- lapply(eta_values, function(eta_val) {
 figS3 <- (eta_heatmaps[[1]] + eta_heatmaps[[2]] + eta_heatmaps[[3]]) /
   (eta_heatmaps[[4]] + plot_spacer())
 
-pdf(here("results", "P3_FigureS3_eta_heatmaps.pdf"), width = 12, height = 7)
+pdf(here("results", "P3_FigureS3_eta_heatmaps_KAVQ.pdf"), width = 12, height = 7)
 print(figS3)
 dev.off()
 
-png(here("results", "P3_FigureS3_eta_heatmaps.png"), width = 12, height = 7, units = "in", res = 300)
+png(here("results", "P3_FigureS3_eta_heatmaps_KAVQ.png"), width = 12, height = 7, units = "in", res = 300)
 print(figS3)
 dev.off()
 
@@ -377,11 +377,11 @@ figS4 <- ggplot(eta_sensitivity, aes(x = factor(eta), y = mean_failure_days)) +
         plot.title = element_text(size = 10, face = "bold")) +
   labs(x = "Saturation efficiency (eta)", y = "Mean failure days per summer", title = "")
 
-pdf(here("results", "P3_FigureS4_eta_sensitivity.pdf"), width = 6, height = 4)
+pdf(here("results", "P3_FigureS4_eta_sensitivity_KAVQ.pdf"), width = 6, height = 4)
 print(figS4)
 dev.off()
 
-png(here("results", "P3_FigureS4_eta_sensitivity.png"), width = 6, height = 4, units = "in", res = 300)
+png(here("results", "P3_FigureS4_eta_sensitivity_KAVQ.png"), width = 6, height = 4, units = "in", res = 300)
 print(figS4)
 dev.off()
 

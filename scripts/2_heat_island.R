@@ -40,13 +40,13 @@ lst_path <- here("data", "rasters", "tucson_tmax_summer.tif")
 
 if (!file.exists(lst_path)) {
   
-  cat("=== Downloading PRISM tmax (Jun-Sep 2023) ===\n")
+  cat("=== Downloading PRISM tmax  ===\n")
   prism_dir <- here("data", "rasters", "prism_raw")
   dir.create(prism_dir, recursive = TRUE, showWarnings = FALSE)
   prism_set_dl_dir(prism_dir)
   
   # Download monthly tmax for Jun, Jul, Aug, Sep 2023
-  get_prism_monthlys(type = "tmax", years = c(2018:2025), mon = 5:9, keepZip = FALSE, resolution = "800m")
+  get_prism_monthlys(type = "tmax", years = c(2016:2025), mon = 5:9, keepZip = FALSE, resolution = "800m")
   
   pd <- prism_archive_ls()
   cat("PRISM files downloaded:", length(pd), "\n")

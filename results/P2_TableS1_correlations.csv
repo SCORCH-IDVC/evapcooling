@@ -1,6 +1,6 @@
 "variable","rho","p"
-"Mean summer tmax",0.01,0.799
-"Median income",-0.389,7.36e-23
-"% Minority",0.53,3.37e-44
-"% Renter",0.03,0.471
-"Mean NDVI",-0.482,9.3e-36
+"Mean summer tmax",0.009,0.828
+"Median income",-0.383,4.79e-22
+"% Minority",0.471,6.49e-34
+"% Renter",0.018,0.661
+"Mean NDVI",-0.485,3.59e-36
