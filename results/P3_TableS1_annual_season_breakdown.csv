@@ -1,6 +1,8 @@
 "year","season","failure_days","total_failure_hours","longest_streak"
 2016,"Monsoon",35,185,12
 2016,"Pre-monsoon",7,26,4
+2017,"Monsoon",34,128,8
+2017,"Pre-monsoon",8,58,8
 2018,"Monsoon",38,221,23
 2018,"Pre-monsoon",1,1,1
 2019,"Monsoon",50,236,21
