@@ -1,8 +1,8 @@
-ssp,period,n_above,n_newly_above,pct_above,pct_newly_above
-observed,baseline,305,0,51.7,0
-ssp245,near,316,11,53.6,1.9
-ssp245,mid,321,16,54.4,2.7
-ssp245,far,323,18,54.7,3.1
-ssp585,near,314,9,53.2,1.5
-ssp585,mid,322,17,54.6,2.9
-ssp585,far,325,20,55.1,3.4
+"ssp","period","n_above","n_newly_above","pct_above","pct_newly_above"
+"observed","baseline",304,0,51.5,0
+"ssp245","near",315,11,53.4,1.9
+"ssp245","mid",319,15,54.1,2.5
+"ssp245","far",322,18,54.6,3.1
+"ssp585","near",311,7,52.7,1.2
+"ssp585","mid",322,18,54.6,3.1
+"ssp585","far",324,20,54.9,3.4
